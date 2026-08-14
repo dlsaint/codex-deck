@@ -1,0 +1,63 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Run deterministic diagnostics
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = '.\dist\CodexProjectCenter.exe'
+          $tests = @('cache-merge-test', 'title-sync-test', 'navigation-event-test')
+
+          foreach ($test in $tests) {
+            $path = ".\dist\$test.json"
+            & $exe "--$test" $path
+            $result = Get-Content -Raw $path | ConvertFrom-Json
+            $failed = $result.PSObject.Properties | Where-Object { $_.Value -eq $false }
+            if ($failed) {
+              throw "$test failed: $($failed.Name -join ', ')"
+            }
+          }
+
+      - name: Package
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ github.ref_name }}'
+          $package = '.\dist\package\CodexDeck'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item '.\dist\CodexProjectCenter.exe' $package
+          Copy-Item '.\LICENSE', '.\README.md', '.\README.zh-CN.md', '.\PRIVACY.md' $package
+
+          $zip = ".\dist\CodexDeck-$version-win-x64.zip"
+          Compress-Archive -Path "$package\*" -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -NoNewline
+
+      - name: Create GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = '${{ github.ref_name }}'
+          gh release create $version `
+            ".\dist\CodexDeck-$version-win-x64.zip" `
+            ".\dist\CodexDeck-$version-win-x64.zip.sha256" `
+            --title "Codex Deck $version" `
+            --generate-notes

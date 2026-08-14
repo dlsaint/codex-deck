@@ -1,95 +1,126 @@
-# Codex Deck
+<div align="center">
+  <img src="assets/project-center.png" width="96" alt="Codex Deck icon">
+  <h1>Codex Deck</h1>
+  <p><strong>A native Windows task inbox for Codex Desktop.</strong></p>
+  <p>Track local and remote tasks, review completed work, and jump back into the right conversation.</p>
+  <p><a href="README.zh-CN.md">简体中文</a></p>
+  <p>
+    <a href="https://github.com/dlsaint/codex-deck/actions/workflows/build.yml"><img src="https://github.com/dlsaint/codex-deck/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/dlsaint/codex-deck" alt="MIT License"></a>
+    <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-2F9CF4" alt="Windows 10/11">
+    <img src="https://img.shields.io/badge/UI-native%20WPF-202123" alt="Native WPF">
+  </p>
+</div>
 
-Codex 任务台——面向 Windows 的原生任务收件箱，将本机和远程任务统一整理为“待我处理”“进行中”和“最近完成”。
+![Codex Deck demo](docs/images/codex-deck-demo.gif)
 
-> 本项目是非官方社区项目，与 OpenAI 无隶属、赞助或认可关系。Codex、ChatGPT 和 OpenAI 是其各自权利人的商标。
+> The demo uses synthetic projects and task text. No real conversation data is included.
 
-## 界面预览
+Codex Deck turns scattered Codex sessions into a small human-in-the-loop workflow: what is still running, what needs your attention, and what you have already reviewed.
 
-截图使用示例项目和任务数据，不包含真实会话内容。
+## Why Codex Deck?
 
-### 待我处理
+- **Review inbox** — finished tasks remain in **Needs attention** until you explicitly mark them handled.
+- **Local and remote tasks** — one view for local sessions and Codex-managed SSH projects.
+- **Side-conversation awareness** — tracks side tasks and returns to the matching parent conversation when possible.
+- **Fast task navigation** — opens Codex and targets the relevant conversation instead of acting as a passive status widget.
+- **Native and lightweight** — WPF + .NET Framework, with no Electron, WebView, account system or project telemetry.
+- **Event-first updates** — desktop IPC and lifecycle events provide fast status changes, with bounded polling only as a fallback.
 
-![Codex Deck 待我处理](docs/images/codex-deck-waiting.png)
+## Workflow
 
-### 进行中
-
-![Codex Deck 进行中](docs/images/codex-deck-running.png)
-
-## 功能
-
-- 原生 WPF + .NET Framework，无 Electron、WebView 或浏览器进程
-- 分类显示“待我处理”“进行中”“最近完成”
-- 聚合本机和 Codex 托管远程主机的 session
-- 识别普通任务和侧边任务，并尽可能返回对应 Codex 界面
-- 待处理任务由用户确认“已处理”后才进入最近完成
-- 通过 Codex Desktop IPC 校准实时状态和等待标志
-- 每 25 秒低频校准，空闲时无高频轮询
-- 关闭窗口后驻留系统托盘
-- 支持键盘切换栏目和快速打开任务
-
-## 与监控 HUD 的区别
-
-本项目重点不是 Token 或额度展示，而是 human-in-the-loop 工作流：哪些任务仍在运行、哪些已经完成但需要用户查看、哪些已经由用户确认处理。
-
-## 兼容性说明
-
-项目会读取 Codex 本地 session、桌面日志、全局状态，并使用本地 IPC、系统 OpenSSH 和有限的 UI Automation。部分数据结构和导航能力不是稳定公开 API，Codex Desktop 更新后可能需要同步适配。
-
-当前支持 Windows 10/11。远程功能要求系统已安装 OpenSSH Client，并且 Codex Desktop 已保存对应远程项目配置。
-
-## 构建
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build.ps1
+```mermaid
+flowchart LR
+    A["Codex Desktop sessions"] --> D["Status engine"]
+    B["Desktop IPC and logs"] --> D
+    C["Managed remote sessions over SSH"] --> D
+    D --> E["Needs attention"]
+    D --> F["Running"]
+    D --> G["Recently completed"]
+    E --> H["Open task"]
+    E --> I["Mark handled"]
 ```
 
-生成文件：`dist\CodexProjectCenter.exe`
+## Screenshots
 
-## 运行
+| Needs attention | Running |
+| --- | --- |
+| ![Needs attention](docs/images/codex-deck-waiting.png) | ![Running](docs/images/codex-deck-running.png) |
 
-双击 `start.cmd`，或运行：
+## Project focus
+
+| Capability | Codex Deck | Status-only overlay |
+| --- | :---: | :---: |
+| Running task visibility | ✅ | ✅ |
+| Explicit review inbox | ✅ | Usually not |
+| Manual “handled” acknowledgement | ✅ | Usually not |
+| Local and managed remote sessions | ✅ | Varies |
+| Side-conversation navigation | ✅ | Usually not |
+| Token and billing dashboard | Not a goal | Often supported |
+
+Codex Deck intentionally focuses on task handoff and review rather than token accounting.
+
+## Requirements
+
+- Windows 10 or Windows 11
+- Codex Desktop with at least one local session
+- Windows OpenSSH Client for managed remote projects
+
+## Build from source
 
 ```powershell
+git clone git@github.com:dlsaint/codex-deck.git
+cd codex-deck
+powershell -ExecutionPolicy Bypass -File .\build.ps1
 .\dist\CodexProjectCenter.exe
 ```
 
-## 创建桌面快捷方式
+Create a desktop shortcut:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-shortcut.ps1
 ```
 
-## 后台自检
-
-不会打开窗口或抢占焦点：
+## Headless diagnostics
 
 ```powershell
 .\dist\CodexProjectCenter.exe --self-test .\dist\self-test.json
+.\dist\CodexProjectCenter.exe --cache-merge-test .\dist\cache-merge-test.json
+.\dist\CodexProjectCenter.exe --title-sync-test .\dist\title-sync-test.json
+.\dist\CodexProjectCenter.exe --navigation-event-test .\dist\navigation-event-test.json
 ```
 
-## Performance diagnostics
+Performance diagnostics are stored in `%LOCALAPPDATA%\CodexProjectCenter\project-center.log`. Search for `[PERF]` to find threshold-based timing and resource records.
 
-Threshold-based diagnostics are written to:
+## Compatibility notes
 
-`%LOCALAPPDATA%\CodexProjectCenter\project-center.log`
+Codex Deck reads local session records, Codex Desktop state and logs, and uses local named-pipe IPC, OpenSSH and limited UI Automation. Some of these structures are implementation details rather than stable public APIs, so a Codex Desktop update may require a compatibility update here.
 
-Search the log for `[PERF]`. Normal operations below the thresholds produce no
-performance records, and each category is rate-limited. Categories cover full
-refresh, local sessions, remote SSH, IPC flow, desktop logs and UI rendering.
+## Privacy
 
-报告包含任务数量、状态分类、主机分布、耗时和内存占用。
+- No telemetry, analytics, advertising or project-operated cloud service.
+- Task titles, status, working directories and short previews are processed locally.
+- Remote task discovery uses the machine's existing SSH and Codex configuration.
+- See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md).
 
-## 隐私与安全
+## Roadmap
 
-- 所有状态处理默认在本机完成，本项目不提供云端服务或遥测。
-- 应用会读取任务标题、状态、工作目录和短预览文本。
-- 远程任务使用当前系统已有的 SSH 配置读取。
-- 详细说明见 [PRIVACY.md](PRIVACY.md) 和 [SECURITY.md](SECURITY.md)。
+- [ ] Signed, downloadable Windows releases
+- [ ] Automatic update checks
+- [ ] Configurable local notifications and sounds
+- [ ] English application UI
+- [ ] Additional navigation paths as Codex exposes stable APIs
+- [ ] Modularize the current single-file prototype for easier contributions
 
-## 贡献
+## Contributing
 
-构建和测试说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。提交问题前请删除日志中的用户名、路径、主机名、任务正文和任务 ID。
+See [CONTRIBUTING.md](CONTRIBUTING.md). Do not attach raw session logs or screenshots containing private task text to public issues.
+
+Release maintainers can use the tag-driven process in [RELEASING.md](RELEASING.md).
+
+## Disclaimer
+
+Codex Deck is an unofficial community project and is not affiliated with, sponsored by, or endorsed by OpenAI. Codex, ChatGPT and OpenAI are trademarks of their respective owners.
 
 ## License
 

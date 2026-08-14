@@ -105,10 +105,12 @@ def generate(filename, selected, counts, rows, footer_status):
     text(draw, (WIDTH - status_width - 38, 861), footer_status, FONT_16, "#5D6470")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    image.save(OUTPUT_DIR / filename, optimize=True)
+    output_path = OUTPUT_DIR / filename
+    image.save(output_path, optimize=True)
+    return output_path
 
 
-generate(
+waiting_path = generate(
     "codex-deck-waiting.png",
     "waiting",
     (3, 2, 18),
@@ -120,7 +122,7 @@ generate(
     "本机与远程状态已同步",
 )
 
-generate(
+running_path = generate(
     "codex-deck-running.png",
     "running",
     (1, 3, 18),
@@ -132,5 +134,32 @@ generate(
     "3 个任务正在运行",
 )
 
-print(OUTPUT_DIR / "codex-deck-waiting.png")
-print(OUTPUT_DIR / "codex-deck-running.png")
+
+waiting_image = Image.open(waiting_path).convert("RGB")
+running_image = Image.open(running_path).convert("RGB")
+frames = [waiting_image]
+durations = [1800]
+for alpha in (0.25, 0.50, 0.75):
+    frames.append(Image.blend(waiting_image, running_image, alpha))
+    durations.append(90)
+frames.append(running_image)
+durations.append(1800)
+for alpha in (0.25, 0.50, 0.75):
+    frames.append(Image.blend(running_image, waiting_image, alpha))
+    durations.append(90)
+
+gif_path = OUTPUT_DIR / "codex-deck-demo.gif"
+palette_frames = [frame.quantize(colors=128, method=Image.Quantize.MEDIANCUT) for frame in frames]
+palette_frames[0].save(
+    gif_path,
+    save_all=True,
+    append_images=palette_frames[1:],
+    duration=durations,
+    loop=0,
+    optimize=True,
+    disposal=2,
+)
+
+print(waiting_path)
+print(running_path)
+print(gif_path)
