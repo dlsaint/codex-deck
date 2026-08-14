@@ -1,6 +1,6 @@
 # Privacy
 
-Codex Project Center is a local Windows desktop application. It has no telemetry, analytics service, advertising SDK, account system, or project-operated cloud service.
+Codex Deck is a local Windows desktop application. It has no telemetry, analytics service, advertising SDK, account system, or project-operated cloud service.
 
 ## Data read by the application
 

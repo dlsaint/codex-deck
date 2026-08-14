@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to Codex Project Center.
+Thanks for contributing to Codex Deck.
 
 ## Requirements
 

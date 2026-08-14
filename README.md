@@ -1,8 +1,20 @@
-# Codex Project Center
+# Codex Deck
 
-面向 Windows 的原生 Codex 任务收件箱，将本机和远程任务统一整理为“待我处理”“进行中”和“最近完成”。
+Codex 任务台——面向 Windows 的原生任务收件箱，将本机和远程任务统一整理为“待我处理”“进行中”和“最近完成”。
 
 > 本项目是非官方社区项目，与 OpenAI 无隶属、赞助或认可关系。Codex、ChatGPT 和 OpenAI 是其各自权利人的商标。
+
+## 界面预览
+
+截图使用示例项目和任务数据，不包含真实会话内容。
+
+### 待我处理
+
+![Codex Deck 待我处理](docs/images/codex-deck-waiting.png)
+
+### 进行中
+
+![Codex Deck 进行中](docs/images/codex-deck-running.png)
 
 ## 功能
 
