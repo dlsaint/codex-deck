@@ -1,0 +1,29 @@
+# Build and diagnostic output
+dist/
+artifacts/
+*.exe
+*.pdb
+*.log
+
+# Local state and test output
+*.user
+*.suo
+*.tmp
+*.bak
+*-test.json
+self-test*.json
+
+# IDE and OS files
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.venv/
+
+# Source image retained locally only; public builds use the generated generic icon.
+assets/chatgpt-taskbar-official.png

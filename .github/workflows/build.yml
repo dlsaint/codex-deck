@@ -1,0 +1,42 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Run deterministic diagnostics
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = '.\dist\CodexProjectCenter.exe'
+          & $exe --cache-merge-test '.\dist\cache-merge-test.json'
+          & $exe --title-sync-test '.\dist\title-sync-test.json'
+          & $exe --navigation-event-test '.\dist\navigation-event-test.json'
+
+          foreach ($path in @(
+            '.\dist\cache-merge-test.json',
+            '.\dist\title-sync-test.json',
+            '.\dist\navigation-event-test.json'
+          )) {
+            $result = Get-Content -Raw $path | ConvertFrom-Json
+            $failed = $result.PSObject.Properties | Where-Object { $_.Value -eq $false }
+            if ($failed) {
+              throw "$path failed: $($failed.Name -join ', ')"
+            }
+          }
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexProjectCenter-windows
+          path: dist/CodexProjectCenter.exe
