@@ -12,7 +12,7 @@
   </p>
 </div>
 
-![Codex Deck demo](docs/images/codex-deck-demo.gif)
+![Codex Deck demo](docs/images/codex-deck-demo-en.gif)
 
 > The demo uses synthetic projects and task text. No real conversation data is included.
 
@@ -45,7 +45,7 @@ flowchart LR
 
 | Needs attention | Running |
 | --- | --- |
-| ![Needs attention](docs/images/codex-deck-waiting.png) | ![Running](docs/images/codex-deck-running.png) |
+| ![Needs attention](docs/images/codex-deck-waiting-en.png) | ![Running](docs/images/codex-deck-running-en.png) |
 
 ## Project focus
 
