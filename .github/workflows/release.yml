@@ -27,7 +27,10 @@ jobs:
 
           foreach ($test in $tests) {
             $path = ".\dist\$test.json"
-            & $exe "--$test" $path
+            $process = Start-Process -FilePath $exe -ArgumentList @("--$test", $path) -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "$test process failed with exit code $($process.ExitCode)"
+            }
             $result = Get-Content -Raw $path | ConvertFrom-Json
             $failed = $result.PSObject.Properties | Where-Object { $_.Value -eq $false }
             if ($failed) {

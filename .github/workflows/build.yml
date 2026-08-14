@@ -19,19 +19,18 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = '.\dist\CodexProjectCenter.exe'
-          & $exe --cache-merge-test '.\dist\cache-merge-test.json'
-          & $exe --title-sync-test '.\dist\title-sync-test.json'
-          & $exe --navigation-event-test '.\dist\navigation-event-test.json'
+          $tests = @('cache-merge-test', 'title-sync-test', 'navigation-event-test')
 
-          foreach ($path in @(
-            '.\dist\cache-merge-test.json',
-            '.\dist\title-sync-test.json',
-            '.\dist\navigation-event-test.json'
-          )) {
+          foreach ($test in $tests) {
+            $path = ".\dist\$test.json"
+            $process = Start-Process -FilePath $exe -ArgumentList @("--$test", $path) -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "$test process failed with exit code $($process.ExitCode)"
+            }
             $result = Get-Content -Raw $path | ConvertFrom-Json
             $failed = $result.PSObject.Properties | Where-Object { $_.Value -eq $false }
             if ($failed) {
-              throw "$path failed: $($failed.Name -join ', ')"
+              throw "$test failed: $($failed.Name -join ', ')"
             }
           }
 
