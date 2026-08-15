@@ -55,6 +55,11 @@ namespace CodexProjectCenter
                 SideNavigationDiagnostics.Run(args[1], args[2], args[3], args[4], args[5], args.Length >= 7 ? args[6] : "local");
                 return;
             }
+            if (args.Length >= 5 && args[0] == "--sidebar-navigation-test")
+            {
+                SidebarNavigationDiagnostics.Run(args[1], args[2], args[3], args[4], args.Length >= 6 ? args[5] : "local");
+                return;
+            }
             if (args.Length >= 3 && args[0] == "--log-monitor-test")
             {
                 LogMonitorDiagnostics.Run(args[1], args[2]);
@@ -418,6 +423,79 @@ namespace CodexProjectCenter
         }
     }
 
+    internal static class CodexWindowLocator
+    {
+        private const string MainWindowClass = "Chrome_WidgetWin_1";
+        private const int MinimumWindowWidth = 480;
+        private const int MinimumWindowHeight = 320;
+
+        internal static IntPtr FindMainWindow()
+        {
+            return FindMainWindows().FirstOrDefault();
+        }
+
+        internal static IList<IntPtr> FindMainWindows()
+        {
+            var processIds = new HashSet<int>();
+            foreach (var process in Process.GetProcessesByName("ChatGPT"))
+            {
+                try { processIds.Add(process.Id); }
+                finally { process.Dispose(); }
+            }
+            if (processIds.Count == 0) return new List<IntPtr>();
+
+            var candidates = new List<WindowCandidate>();
+            NativeMethods.EnumWindows(delegate(IntPtr window, IntPtr parameter)
+            {
+                uint processId;
+                NativeMethods.GetWindowThreadProcessId(window, out processId);
+                if (!processIds.Contains(unchecked((int)processId))) return true;
+
+                var className = new StringBuilder(128);
+                NativeMethods.GetClassName(window, className, className.Capacity);
+                var title = new StringBuilder(256);
+                NativeMethods.GetWindowText(window, title, title.Capacity);
+                NativeMethods.NativeRect rectangle;
+                if (!NativeMethods.GetWindowRect(window, out rectangle)) return true;
+
+                var visible = NativeMethods.IsWindowVisible(window);
+                var iconic = NativeMethods.IsIconic(window);
+                var width = Math.Max(0, rectangle.Right - rectangle.Left);
+                var height = Math.Max(0, rectangle.Bottom - rectangle.Top);
+                var score = ScoreCandidate(className.ToString(), title.ToString(), visible, iconic, width, height);
+                if (score != long.MinValue)
+                    candidates.Add(new WindowCandidate { Handle = window, Score = score });
+                return true;
+            }, IntPtr.Zero);
+
+            return candidates.OrderByDescending(candidate => candidate.Score)
+                .Select(candidate => candidate.Handle).ToList();
+        }
+
+        internal static long ScoreCandidateForTest(string className, string title, bool visible, bool iconic, int width, int height)
+        {
+            return ScoreCandidate(className, title, visible, iconic, width, height);
+        }
+
+        private static long ScoreCandidate(string className, string title, bool visible, bool iconic, int width, int height)
+        {
+            if (!visible || !string.Equals(className, MainWindowClass, StringComparison.Ordinal)) return long.MinValue;
+            if (!iconic && (width < MinimumWindowWidth || height < MinimumWindowHeight)) return long.MinValue;
+
+            var area = (long)Math.Max(0, width) * Math.Max(0, height);
+            var score = Math.Min(area, 1000000000L);
+            if (!iconic) score += 1000000000L;
+            if (string.Equals(title, "ChatGPT", StringComparison.OrdinalIgnoreCase)) score += 10000000000L;
+            return score;
+        }
+
+        private sealed class WindowCandidate
+        {
+            internal IntPtr Handle;
+            internal long Score;
+        }
+    }
+
     internal sealed class MainWindow : Window
     {
         private static readonly Color Ink = Color.FromRgb(32, 33, 35);
@@ -425,6 +503,7 @@ namespace CodexProjectCenter
         private static readonly object SideParentCacheSync = new object();
         private static readonly Dictionary<string, Tuple<string, DateTime>> SideParentCache =
             new Dictionary<string, Tuple<string, DateTime>>(StringComparer.OrdinalIgnoreCase);
+        private static int _clipboardWriteInProgress;
         private readonly Dictionary<string, ThreadItem> _threads = new Dictionary<string, ThreadItem>();
         private readonly AppServerClient _client = new AppServerClient();
         private readonly DispatcherTimer _refreshTimer = new DispatcherTimer();
@@ -1374,7 +1453,7 @@ namespace CodexProjectCenter
                     return;
                 }
                 catch (Exception ex) { AppLog.Error("Thread deeplink failed", ex); }
-                var copied = TrySetClipboardText(item.Id);
+                var copied = await TrySetClipboardTextAsync(item.Id);
                 try
                 {
                     if (ActivateCodexWindow()) { }
@@ -1430,12 +1509,11 @@ namespace CodexProjectCenter
             if (string.IsNullOrWhiteSpace(navigationTitle)) return false;
             try
             {
-                foreach (var process in Process.GetProcessesByName("ChatGPT")
-                    .Where(candidate => candidate.MainWindowHandle != IntPtr.Zero))
+                foreach (var windowHandle in CodexWindowLocator.FindMainWindows())
                 {
-                    NativeMethods.SetForegroundWindow(process.MainWindowHandle);
+                    NativeMethods.SetForegroundWindow(windowHandle);
                     Thread.Sleep(180);
-                    var root = AutomationElement.FromHandle(process.MainWindowHandle);
+                    var root = AutomationElement.FromHandle(windowHandle);
                     EnsureSidebarThreadVisible(root, location.ProjectLabel, navigationTitle);
                     var title = navigationTitle;
                     if (string.IsNullOrWhiteSpace(title)) continue;
@@ -1619,11 +1697,11 @@ namespace CodexProjectCenter
             title = title.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? title;
             try
             {
-                foreach (var process in Process.GetProcessesByName("ChatGPT").Where(candidate => candidate.MainWindowHandle != IntPtr.Zero))
+                foreach (var windowHandle in CodexWindowLocator.FindMainWindows())
                 {
-                    NativeMethods.SetForegroundWindow(process.MainWindowHandle);
+                    NativeMethods.SetForegroundWindow(windowHandle);
                     Thread.Sleep(120);
-                    var root = AutomationElement.FromHandle(process.MainWindowHandle);
+                    var root = AutomationElement.FromHandle(windowHandle);
                     foreach (AutomationElement element in FindSideConversationTabs(root, title))
                     {
                         object selectionPattern;
@@ -1661,9 +1739,9 @@ namespace CodexProjectCenter
             title = title.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? title;
             try
             {
-                foreach (var process in Process.GetProcessesByName("ChatGPT").Where(candidate => candidate.MainWindowHandle != IntPtr.Zero))
+                foreach (var windowHandle in CodexWindowLocator.FindMainWindows())
                 {
-                    var root = AutomationElement.FromHandle(process.MainWindowHandle);
+                    var root = AutomationElement.FromHandle(windowHandle);
                     var window = root.Current.BoundingRectangle;
                     var tabs = FindSideConversationTabs(root, title);
                     if (tabs == null) continue;
@@ -1728,36 +1806,162 @@ namespace CodexProjectCenter
             return NavigationEventCatalog.IsCurrentlyViewed(item.Id) || IsSideConversationTabSelected(item);
         }
 
-        private static void EnsureSidebarThreadVisible(AutomationElement root, string projectLabel, string title)
+        private static bool EnsureSidebarThreadVisible(AutomationElement root, string projectLabel, string title)
         {
-            if (root == null || string.IsNullOrWhiteSpace(projectLabel)) return;
+            if (root == null || string.IsNullOrWhiteSpace(projectLabel) || string.IsNullOrWhiteSpace(title)) return false;
             try
             {
                 var titleCondition = new AndCondition(
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem),
                     new PropertyCondition(AutomationElement.NameProperty, title));
-                if (root.FindFirst(TreeScope.Descendants, titleCondition) != null) return;
                 var projectCondition = new AndCondition(
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Group),
                     new PropertyCondition(AutomationElement.NameProperty, projectLabel));
                 var project = root.FindFirst(TreeScope.Descendants, projectCondition);
-                if (project == null) return;
-                var projectButton = project.FindFirst(TreeScope.Descendants, new AndCondition(
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
-                    new PropertyCondition(AutomationElement.NameProperty, projectLabel + " work")));
-                if (projectButton != null && projectButton.Current.IsEnabled) { TryInvoke(projectButton); Thread.Sleep(180); }
-                project = root.FindFirst(TreeScope.Descendants, projectCondition) ?? project;
-                if (project.FindFirst(TreeScope.Descendants, titleCondition) != null) return;
-                foreach (AutomationElement button in project.FindAll(TreeScope.Descendants,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)))
-                    if (string.Equals(button.Current.Name, "展开显示", StringComparison.Ordinal) && button.Current.IsEnabled)
+                if (project == null)
+                {
+                    AppLog.Info("Sidebar reveal project missing project=" + projectLabel + " title=" + title);
+                    return false;
+                }
+                if (project.FindFirst(TreeScope.Descendants, titleCondition) != null) return true;
+
+                var projectButton = FindProjectExpandButton(project, projectLabel);
+                if (projectButton == null)
+                {
+                    AppLog.Info("Sidebar reveal toggle missing project=" + projectLabel + " title=" + title);
+                    return false;
+                }
+
+                bool expansionRequested;
+                string expansionFailure;
+                if (!TryEnsureProjectExpanded(projectButton, out expansionRequested, out expansionFailure))
+                {
+                    AppLog.Info("Sidebar reveal expand failed project=" + projectLabel + " title=" + title +
+                        " reason=" + expansionFailure);
+                    return false;
+                }
+
+                if (expansionRequested)
+                {
+                    var expansionDeadline = DateTime.UtcNow.AddMilliseconds(1000);
+                    while (DateTime.UtcNow < expansionDeadline)
                     {
-                        TryInvoke(button);
-                        Thread.Sleep(180);
-                        break;
+                        project = root.FindFirst(TreeScope.Descendants, projectCondition);
+                        if (project != null && project.FindFirst(TreeScope.Descendants, titleCondition) != null)
+                        {
+                            AppLog.Info("Sidebar reveal expanded project=" + projectLabel + " title=" + title);
+                            return true;
+                        }
+                        if (project != null && FindLoadMoreButton(project) != null) break;
+                        Thread.Sleep(40);
                     }
+                }
+
+                project = root.FindFirst(TreeScope.Descendants, projectCondition) ?? project;
+                if (project.FindFirst(TreeScope.Descendants, titleCondition) != null) return true;
+
+                var loadMoreButton = FindLoadMoreButton(project);
+                if (loadMoreButton == null)
+                {
+                    AppLog.Info("Sidebar reveal thread missing after expand project=" + projectLabel + " title=" + title);
+                    return false;
+                }
+                if (!TryInvoke(loadMoreButton))
+                {
+                    AppLog.Info("Sidebar reveal load-more invoke failed project=" + projectLabel + " title=" + title);
+                    return false;
+                }
+
+                var loadDeadline = DateTime.UtcNow.AddMilliseconds(1200);
+                while (DateTime.UtcNow < loadDeadline)
+                {
+                    project = root.FindFirst(TreeScope.Descendants, projectCondition);
+                    if (project != null && project.FindFirst(TreeScope.Descendants, titleCondition) != null)
+                    {
+                        AppLog.Info("Sidebar reveal loaded thread project=" + projectLabel + " title=" + title);
+                        return true;
+                    }
+                    Thread.Sleep(40);
+                }
+                AppLog.Info("Sidebar reveal thread missing after load-more project=" + projectLabel + " title=" + title);
             }
-            catch (ElementNotAvailableException) { }
+            catch (ElementNotAvailableException)
+            {
+                AppLog.Info("Sidebar reveal element unavailable project=" + projectLabel + " title=" + title);
+            }
+            catch (InvalidOperationException ex)
+            {
+                AppLog.Info("Sidebar reveal automation error project=" + projectLabel + " title=" + title +
+                    " reason=" + ex.Message);
+            }
+            return false;
+        }
+
+        private static AutomationElement FindProjectExpandButton(AutomationElement project, string projectLabel)
+        {
+            var exact = project.FindFirst(TreeScope.Descendants, new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+                new PropertyCondition(AutomationElement.NameProperty, projectLabel + " work")));
+            if (SupportsExpandCollapse(exact)) return exact;
+
+            foreach (AutomationElement button in project.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)))
+                if (SupportsExpandCollapse(button)) return button;
+            return null;
+        }
+
+        private static bool SupportsExpandCollapse(AutomationElement element)
+        {
+            if (element == null || !element.Current.IsEnabled) return false;
+            object pattern;
+            return element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern);
+        }
+
+        private static bool TryEnsureProjectExpanded(AutomationElement projectButton,
+            out bool expansionRequested, out string failure)
+        {
+            expansionRequested = false;
+            failure = "";
+            try
+            {
+                object value;
+                if (!projectButton.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out value))
+                {
+                    failure = "expand-collapse-pattern-unavailable";
+                    return false;
+                }
+                var pattern = (ExpandCollapsePattern)value;
+                var state = pattern.Current.ExpandCollapseState;
+                if (state == ExpandCollapseState.Expanded) return true;
+                if (state == ExpandCollapseState.LeafNode)
+                {
+                    failure = "leaf-node";
+                    return false;
+                }
+                pattern.Expand();
+                expansionRequested = true;
+                return true;
+            }
+            catch (ElementNotAvailableException)
+            {
+                failure = "element-unavailable";
+                return false;
+            }
+            catch (InvalidOperationException ex)
+            {
+                failure = "expand-rejected:" + ex.Message;
+                return false;
+            }
+        }
+
+        private static AutomationElement FindLoadMoreButton(AutomationElement project)
+        {
+            if (project == null) return null;
+            foreach (AutomationElement button in project.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)))
+                if (string.Equals(button.Current.Name, "展开显示", StringComparison.Ordinal) && button.Current.IsEnabled)
+                    return button;
+            return null;
         }
 
         private static SidebarThreadLocation ReadSidebarThreadLocation(ThreadItem item)
@@ -1925,6 +2129,8 @@ namespace CodexProjectCenter
 
         internal static bool OpenSideConversationForTest(ThreadItem item) { return TryOpenSideConversation(item); }
 
+        internal static bool ActivateSidebarThreadForTest(ThreadItem item) { return TryActivateSidebarThread(item); }
+
         private static bool TryInvokeSidebarThread(AutomationElement listItem)
         {
             try
@@ -1991,7 +2197,7 @@ namespace CodexProjectCenter
 
             if (!await EnsureCodexWindowAsync())
             {
-                var copiedWithoutWindow = TrySetClipboardText(item.Id);
+                var copiedWithoutWindow = await TrySetClipboardTextAsync(item.Id);
                 _footerRight.Text = copiedWithoutWindow ? "无法启动 Codex，任务 ID 已复制" : "无法启动 Codex";
                 return;
             }
@@ -2013,7 +2219,7 @@ namespace CodexProjectCenter
                 return;
             }
 
-            var copied = TrySetClipboardText(item.Id);
+            var copied = await TrySetClipboardTextAsync(item.Id);
             _footerRight.Text = copied ? "未定位到远程任务，任务 ID 已复制" : "未定位到远程任务";
         }
 
@@ -2048,7 +2254,7 @@ namespace CodexProjectCenter
                 ActivateCodexWindow();
                 if (DidCodexRejectDeepLink(item.Id, requestedAt))
                 {
-                    var copiedAfterFailure = TrySetClipboardText(item.Id);
+                    var copiedAfterFailure = await TrySetClipboardTextAsync(item.Id);
                     _footerRight.Text = copiedAfterFailure ? "Codex 未加载该任务，ID 已复制" : "Codex 未加载该远程任务";
                     return;
                 }
@@ -2059,7 +2265,7 @@ namespace CodexProjectCenter
             {
                 AppLog.Error("Remote thread deeplink failed", ex);
             }
-            var copied = TrySetClipboardText(item.Id);
+            var copied = await TrySetClipboardTextAsync(item.Id);
             if (await EnsureCodexWindowAsync())
                 _footerRight.Text = copied ? "已打开 Codex，并复制远程任务 ID" : "已打开 Codex；剪贴板正忙";
             else
@@ -2136,14 +2342,32 @@ namespace CodexProjectCenter
 
         private static bool ActivateCodexWindow()
         {
-            var process = Process.GetProcessesByName("ChatGPT")
-                .FirstOrDefault(candidate => candidate.MainWindowHandle != IntPtr.Zero);
-            if (process == null) return false;
-            if (NativeMethods.IsIconic(process.MainWindowHandle)) NativeMethods.ShowWindow(process.MainWindowHandle, 9);
-            return NativeMethods.SetForegroundWindow(process.MainWindowHandle);
+            var window = CodexWindowLocator.FindMainWindow();
+            if (window == IntPtr.Zero) return false;
+            if (NativeMethods.IsIconic(window)) NativeMethods.ShowWindow(window, 9);
+            return NativeMethods.SetForegroundWindow(window);
         }
 
-        private static bool TrySetClipboardText(string value)
+        private static async Task<bool> TrySetClipboardTextAsync(string value)
+        {
+            if (Interlocked.CompareExchange(ref _clipboardWriteInProgress, 1, 0) != 0) return false;
+
+            var completion = new TaskCompletionSource<bool>();
+            var thread = new Thread(delegate()
+            {
+                try { completion.TrySetResult(TrySetClipboardTextCore(value)); }
+                catch { completion.TrySetResult(false); }
+                finally { Interlocked.Exchange(ref _clipboardWriteInProgress, 0); }
+            });
+            thread.IsBackground = true;
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+
+            var finished = await Task.WhenAny(completion.Task, Task.Delay(500));
+            return finished == completion.Task && await completion.Task;
+        }
+
+        private static bool TrySetClipboardTextCore(string value)
         {
             for (var attempt = 0; attempt < 5; attempt++)
             {
@@ -5883,6 +6107,24 @@ namespace CodexProjectCenter
                 { "cardUsesSidebarTitle", AppServerClient.DisplayTitle(new ThreadItem { Title = "旧消息", NavigationTitle = "侧栏名称" }) == "侧栏名称" },
                 { "sideCardKeepsOwnTitle", AppServerClient.DisplayTitle(new ThreadItem { Title = "侧边任务", NavigationTitle = "父任务", IsSideConversation = true }) == "侧边任务" }
             };
+            var tooltipScore = CodexWindowLocator.ScoreCandidateForTest(
+                "MicrosoftWindowsTooltip", "", true, false, 27, 18);
+            var tinyChromeScore = CodexWindowLocator.ScoreCandidateForTest(
+                "Chrome_WidgetWin_1", "ChatGPT", true, false, 27, 18);
+            var mainWindowScore = CodexWindowLocator.ScoreCandidateForTest(
+                "Chrome_WidgetWin_1", "ChatGPT", true, false, 1933, 1045);
+            var secondaryWindowScore = CodexWindowLocator.ScoreCandidateForTest(
+                "Chrome_WidgetWin_1", "", true, false, 900, 600);
+            var minimizedWindowScore = CodexWindowLocator.ScoreCandidateForTest(
+                "Chrome_WidgetWin_1", "ChatGPT", true, true, 160, 28);
+            report["windowLocatorChecks"] = new Dictionary<string, object>
+            {
+                { "tooltipRejected", tooltipScore == long.MinValue },
+                { "tinyChromeRejected", tinyChromeScore == long.MinValue },
+                { "mainWindowAccepted", mainWindowScore != long.MinValue },
+                { "mainWindowPreferred", mainWindowScore > secondaryWindowScore },
+                { "minimizedMainWindowAccepted", minimizedWindowScore != long.MinValue }
+            };
             report["completionChecks"] = new Dictionary<string, object>
             {
                 { "runningToIdleNeedsReview", AppServerClient.ShouldTreatCompletionAsWaiting(TaskGroup.Running, new DesktopThreadStatus { Type = "idle" }) },
@@ -6017,6 +6259,24 @@ namespace CodexProjectCenter
             {
                 { "opened", opened }, { "threadId", threadId }, { "parentThreadId", parentThreadId },
                 { "project", project }, { "title", title }, { "hostId", hostId }
+            }), Encoding.UTF8);
+        }
+    }
+
+    internal static class SidebarNavigationDiagnostics
+    {
+        public static void Run(string outputPath, string threadId, string project, string title, string hostId)
+        {
+            var item = new ThreadItem
+            {
+                Id = threadId, HostId = hostId ?? "local", Project = project,
+                Title = title, NavigationTitle = title
+            };
+            var activated = MainWindow.ActivateSidebarThreadForTest(item);
+            File.WriteAllText(outputPath, new JavaScriptSerializer().Serialize(new Dictionary<string, object>
+            {
+                { "activated", activated }, { "threadId", threadId }, { "project", project },
+                { "title", title }, { "hostId", hostId }
             }), Encoding.UTF8);
         }
     }
@@ -6461,6 +6721,8 @@ namespace CodexProjectCenter
             internal uint Timeout;
         }
 
+        internal delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         internal static extern bool FlashWindowEx(ref FlashInfo info);
 
@@ -6501,6 +6763,21 @@ namespace CodexProjectCenter
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         internal static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rectangle);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern bool IsWindowVisible(IntPtr window);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        internal static extern int GetClassName(IntPtr window, StringBuilder className, int maximumCount);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        internal static extern int GetWindowText(IntPtr window, StringBuilder title, int maximumCount);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         internal static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
